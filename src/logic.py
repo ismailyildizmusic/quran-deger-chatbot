@@ -172,4 +172,17 @@ def compose_answer(user_text: str, values: list[str], verses: list[Verse]) -> st
     lines.append("1. **Zararı durdur:** Yanlışsa hemen devamını kes (paylaşma, yayma, haksız kazanç vb.).")
     lines.append("2. **Rıza / hak kontrolü:** Birinin rızası yoksa dur; hak varsa telafi et (özür + düzeltme + iade).")
     lines.append("3. **Doğrulama:** Bilgi ise kaynağı kontrol et; zan/iftiraya düşme.")
-    lines.append("4.
+    lines.append("4. **Alternatif üret:** Aynı hedefe hak ihlalsiz ulaşmanın yolunu seç.")
+    lines.append("5. **Tekrarı önle:** Kendin için net bir kural koy (mahremiyet, emek, israf vb.).")
+
+    lines.append("\n### 4) Kur’an referansları (sûre:ayet)")
+    if not verses:
+        lines.append("- Bu soru için aramada yeterince güçlü eşleşme bulamadım.")
+    else:
+        for v in verses:
+            lines.append(f"- **{v.surah_name_en} / {v.surah_name_ar} ({v.ref})**")
+            lines.append(f"  - Arapça: {v.ar}")
+            lines.append(f"  - Türkçe: {v.tr}")
+
+    lines.append("\n> Not: Bu uygulama kişiye özel dini hüküm/fetva vermez; **değer temelli** rehberlik sağlar.")
+    return "\n".join(lines)
