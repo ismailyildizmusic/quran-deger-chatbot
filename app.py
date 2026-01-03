@@ -13,7 +13,7 @@ st.caption("Adalet • Kul hakkı • Doğruluk • Mahremiyet • Güven • Em
 
 with st.expander("⚠️ Kullanım Notu", expanded=True):
     st.write(
-        "Bu uygulama kişiye özel dini hüküm/fetva üretmez. "
+        "Bu uygulama TÜBİTAK 2204 - B kapsamında hazırlanmıştır ve kişiye özel dini hüküm/fetva üretmez. "
         "Kur’an’dan **ayetleri API üzerinden aynen** getirir ve değer temelli rehberlik yapar."
     )
 
