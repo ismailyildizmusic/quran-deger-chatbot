@@ -1,13 +1,13 @@
 from __future__ import annotations
-from src.policy import detect_flags, build_prefix
+
 import re
 from dataclasses import dataclass
-from typing import Iterable
 
 from rapidfuzz import fuzz
 
 from src.api import search, ayah_multi
 from src.values import VALUES, SEARCH_SEEDS, STOPWORDS_TR
+from src.policy import detect_flags, build_prefix
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,6 @@ def _tokenize(text: str) -> list[str]:
     text = re.sub(r"[^a-zçğıöşü0-9\s]", " ", text)
     parts = [p.strip() for p in text.split() if p.strip()]
     parts = [p for p in parts if len(p) >= 3 and p not in STOPWORDS_TR]
-    # benzersizleştir, sırayı koru
     seen = set()
     out = []
     for p in parts:
@@ -38,8 +37,7 @@ def _tokenize(text: str) -> list[str]:
 
 def detect_values(user_text: str) -> list[str]:
     """
-    Basit ama etkili: anahtar kelime + fuzzy.
-    En fazla 3 değer döndürür.
+    Kullanıcı sorusundan en fazla 3 değer tespit eder.
     """
     t = user_text.lower()
     scored: list[tuple[str, int]] = []
@@ -59,29 +57,23 @@ def detect_values(user_text: str) -> list[str]:
     return [v for v, _ in scored][:3]
 
 
-def _collect_candidates(
-    user_text: str,
-    values: list[str],
-    edition_or_language: str,
-) -> dict[str, dict]:
+def _collect_candidates(user_text: str, values: list[str], edition_or_language: str) -> dict[str, dict]:
     """
-    Aday ayetleri arama endpoint'inden toplar.
-    Dönen: ref -> { score, surah_no, ayah_no, snippet_tr, surah_name_en, surah_name_ar }
+    Search endpoint ile aday ayetleri toplar.
+    Dönen: ref -> metadata(score vs.)
     """
     tokens = _tokenize(user_text)
 
-    # arama kelimeleri: kullanıcının kelimeleri + değer seed'leri
     seeds = []
     for v in values:
         seeds.extend(SEARCH_SEEDS.get(v, []))
-    query_terms = list(dict.fromkeys(tokens + seeds))[:12]
 
+    query_terms = list(dict.fromkeys(tokens + seeds))[:12]
     candidates: dict[str, dict] = {}
 
     for q in query_terms:
         data = search(q, surah="all", edition_or_language=edition_or_language)
         for m in data.get("matches", [])[:30]:
-            # Match yapısı API'ye göre değişebilir; güvenli okuyalım
             surah = m.get("surah", {}) or {}
             surah_no = int(surah.get("number", 0) or 0)
             surah_name_en = surah.get("englishName", "") or ""
@@ -93,7 +85,6 @@ def _collect_candidates(
                 continue
 
             ref = f"{surah_no}:{ayah_no}"
-            # alaka skoru: ayet metni ile soru benzerliği
             sim = fuzz.partial_ratio(text_tr.lower(), user_text.lower()) if text_tr else 0
             boost = 10 if q in seeds else 0
             score = sim + boost
@@ -105,28 +96,23 @@ def _collect_candidates(
                     "ayah_no": ayah_no,
                     "surah_name_en": surah_name_en,
                     "surah_name_ar": surah_name_ar,
-                    "snippet_tr": text_tr,
                 }
 
     return candidates
 
 
-def fetch_best_verses(
-    user_text: str,
-    values: list[str],
-    tr_edition_id: str,
-    limit: int = 4,
-) -> list[Verse]:
+def fetch_best_verses(user_text: str, values: list[str], tr_edition_id: str, limit: int = 4) -> list[Verse]:
     """
-    1) search ile aday ref'ler
-    2) en iyilerini seç
-    3) /ayah/{ref}/editions/arabic,tr ile tam metin çek
+    1) Search ile aday ref'leri bul
+    2) En iyi limit tanesini seç
+    3) Ayah multi ile Arapça + Türkçe meal getir
     """
     candidates = _collect_candidates(user_text, values, edition_or_language=tr_edition_id)
     best = sorted(candidates.items(), key=lambda x: x[1]["score"], reverse=True)[:limit]
-    verses: list[Verse] = []
 
+    verses: list[Verse] = []
     editions = f"quran-uthmani,{tr_edition_id}"
+
     for ref, meta in best:
         items = ayah_multi(ref, editions)
 
@@ -155,30 +141,26 @@ def fetch_best_verses(
 
 def compose_answer(user_text: str, values: list[str], verses: list[Verse]) -> str:
     """
-    Yüzeyselliği kıran sabit format:
-    1) Değer analizi
-    2) Zarar/sonuç
-    3) Uygulanabilir adımlar
-    4) Kur’an referansları (sûre:ayet + Arapça + Türkçe)
+    Sabit ve 'derin' format.
+    Ayrıca 'haram/helal/yasak/doğru-yanlış' algılarsa uyarı ekler.
     """
-        flags = detect_flags(user_text)
+    flags = detect_flags(user_text)
     prefix = build_prefix(flags)
 
     lines: list[str] = []
     if prefix:
         lines.append(prefix)
 
-    if flags.get("risk_hits"):
-        lines.append("### 1b) Soruda tespit edilen hassas ifadeler")
-        for k, v in flags["risk_hits"].items():
-            lines.append(f"- **{k}**: {', '.join(v)}")
-        lines.append("")
-
     lines.append("### 1) Değer analizi")
     if values:
         lines.append("- Bu soru şu değerlerle ilişkilidir: **" + ", ".join(values) + "**.")
     else:
         lines.append("- Sorunun değeri net değil; yine de genel ahlaki ilkeler üzerinden ele alıyorum.")
+
+    if flags.get("risk_hits"):
+        lines.append("\n### 1b) Soruda tespit edilen hassas ifadeler")
+        for k, v in flags["risk_hits"].items():
+            lines.append(f"- **{k}**: {', '.join(v)}")
 
     lines.append("\n### 2) Zarar / sonuç değerlendirmesi")
     lines.append("- **Hak boyutu:** Birinin hakkı zedeleniyor mu? (kul hakkı / adalet)")
@@ -190,17 +172,4 @@ def compose_answer(user_text: str, values: list[str], verses: list[Verse]) -> st
     lines.append("1. **Zararı durdur:** Yanlışsa hemen devamını kes (paylaşma, yayma, haksız kazanç vb.).")
     lines.append("2. **Rıza / hak kontrolü:** Birinin rızası yoksa dur; hak varsa telafi et (özür + düzeltme + iade).")
     lines.append("3. **Doğrulama:** Bilgi ise kaynağı kontrol et; zan/iftiraya düşme.")
-    lines.append("4. **Alternatif üret:** Aynı hedefe hak ihlalsiz ulaşmanın yolunu seç.")
-    lines.append("5. **Tekrarı önle:** Kendin için net bir kural koy (mahremiyet, emek, israf vb.).")
-
-    lines.append("\n### 4) Kur’an referansları (sûre:ayet)")
-    if not verses:
-        lines.append("- Bu soru için aramada yeterince güçlü eşleşme bulamadım. (Anahtar kelimeleri genişletmek gerekir.)")
-    else:
-        for v in verses:
-            lines.append(f"- **{v.surah_name_en} / {v.surah_name_ar} ({v.ref})**")
-            lines.append(f"  - Arapça: {v.ar}")
-            lines.append(f"  - Türkçe: {v.tr}")
-
-    lines.append("\n> Not: Bu uygulama kişiye özel dini hüküm/fetva vermez; **değer temelli** rehberlik sağlar.")
-    return "\n".join(lines)
+    lines.append("4.
