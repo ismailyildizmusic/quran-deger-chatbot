@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from src.policy import detect_flags, build_prefix
 import re
 from dataclasses import dataclass
 from typing import Iterable
@@ -161,7 +161,18 @@ def compose_answer(user_text: str, values: list[str], verses: list[Verse]) -> st
     3) Uygulanabilir adımlar
     4) Kur’an referansları (sûre:ayet + Arapça + Türkçe)
     """
+        flags = detect_flags(user_text)
+    prefix = build_prefix(flags)
+
     lines: list[str] = []
+    if prefix:
+        lines.append(prefix)
+
+    if flags.get("risk_hits"):
+        lines.append("### 1b) Soruda tespit edilen hassas ifadeler")
+        for k, v in flags["risk_hits"].items():
+            lines.append(f"- **{k}**: {', '.join(v)}")
+        lines.append("")
 
     lines.append("### 1) Değer analizi")
     if values:
